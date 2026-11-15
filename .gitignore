@@ -1,0 +1,9 @@
+/target/
+/.agents/
+/.aws/
+/.codex/
+*.log
+.DS_Store
+.idea/
+.vscode/
+/data/imports/*.tsv

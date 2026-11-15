@@ -1,0 +1,40 @@
+export component MainWindow inherits Window {
+    title: "FluoVerba";
+    preferred-width: 900px;
+    preferred-height: 120px;
+    background: #14202c;
+
+    in-out property <string> spanish: "";
+    in-out property <string> russian: "";
+    in-out property <float> progress: 0;
+
+    // A single position is shared by both lines: they cannot drift apart.
+    Rectangle {
+        background: #14202c;
+        width: parent.width;
+        height: parent.height;
+
+        Text {
+            text: root.spanish;
+            color: #f1f5f9;
+            font-size: 23px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            x: (1.0 - 2.0 * root.progress) * root.width;
+            y: 10px;
+            width: root.width;
+            height: 42px;
+        }
+        Text {
+            text: root.russian;
+            color: #9be7c4;
+            font-size: 20px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            x: (1.0 - 2.0 * root.progress) * root.width;
+            y: 62px;
+            width: root.width;
+            height: 38px;
+        }
+    }
+}
