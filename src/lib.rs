@@ -1,3 +1,4 @@
+pub mod speech;
 pub mod storage;
 
 use std::{
@@ -10,13 +11,18 @@ use std::{
 
 slint::include_modules!();
 
+#[cfg(not(target_os = "android"))]
 pub fn run_gui_at(database: &Path) -> Result<(), Box<dyn Error>> {
-    run_gui_with_keep_screen_callback(database, |_| {})
+    let settings = load_speech_settings(database);
+    let speech = speech::SpeechService::desktop(&settings);
+    run_gui_with_keep_screen_callback(database, |_| {}, speech, settings)
 }
 
 pub fn run_gui_with_keep_screen_callback(
     database: &Path,
     keep_screen_callback: impl Fn(bool) + 'static,
+    speech: speech::SpeechService,
+    speech_settings: speech::SpeechSettings,
 ) -> Result<(), Box<dyn Error>> {
     if !storage::database_exists(database) {
         return Err(format!(
@@ -27,9 +33,9 @@ pub fn run_gui_with_keep_screen_callback(
     }
 
     let connection = storage::open_database(database)?;
-    let mut batch = storage::gui_pairs_after(&connection, None)?;
+    let batch = storage::gui_pairs_after(&connection, None)?;
     let mut cursor = batch.last().map(|item| item.0);
-    let mut phrases: Vec<_> = batch.drain(..).map(|item| (item.1, item.2)).collect();
+    let mut phrases = batch;
 
     let window = MainWindow::new()?;
     let weak = window.as_weak();
@@ -58,11 +64,18 @@ pub fn run_gui_with_keep_screen_callback(
             let _ = std::fs::remove_file(temporary);
         }
     });
-    window.set_spanish(phrases[0].0.as_str().into());
-    window.set_russian(phrases[0].1.as_str().into());
+    window.set_spanish(phrases[0].1.as_str().into());
+    window.set_russian(phrases[0].2.as_str().into());
+    window.set_speech_enabled(speech_settings.enabled);
+    window.set_speech_rate(speech_settings.rate);
+    window.set_speech_language(speech_settings.language.as_str().into());
+    window.set_russian_translation_enabled(speech_settings.russian_enabled);
+    window.set_russian_volume(speech_settings.russian_volume);
+    window.set_russian_voice(speech_settings.russian_voice.as_str().into());
     let mut pair_index = 0usize;
     let mut progress = 0.0_f32;
     let controls = Rc::new(RefCell::new(SettingsState::default()));
+    let speech_state = Rc::new(RefCell::new(speech_settings.clone()));
     let render_metrics = Rc::new(RefCell::new(RenderMetrics::default()));
     window.window().set_rendering_notifier({
         let metrics = render_metrics.clone();
@@ -195,8 +208,107 @@ pub fn run_gui_with_keep_screen_callback(
         );
     });
 
+    let settings_path = database.with_extension("ticker-settings");
+    let speech_for_enabled = speech.clone();
+    let state_for_enabled = speech_state.clone();
+    let settings_path_for_enabled = settings_path.clone();
+    window.on_speech_enabled_changed(move |enabled| {
+        #[cfg(target_os = "android")]
+        eprintln!("[FLUOVERBA_TTS] toggle enabled={enabled}");
+        speech_for_enabled.set_enabled(enabled);
+        let mut settings = state_for_enabled.borrow_mut();
+        settings.enabled = enabled;
+        speech_for_enabled.persist(settings_path_for_enabled.clone(), settings.clone());
+    });
+    let speech_for_rate = speech.clone();
+    let state_for_rate = speech_state.clone();
+    let settings_path_for_rate = settings_path.clone();
+    window.on_speech_rate_changed(move |rate| {
+        speech_for_rate.set_rate(rate);
+        let mut settings = state_for_rate.borrow_mut();
+        settings.rate = rate.clamp(0.5, 1.5);
+        speech_for_rate.persist(settings_path_for_rate.clone(), settings.clone());
+    });
+    let speech_for_language = speech.clone();
+    let state_for_language = speech_state.clone();
+    let settings_path_for_language = settings_path.clone();
+    window.on_speech_language_changed(move |language| {
+        let language = language.to_string();
+        speech_for_language.set_language(language.clone());
+        let mut settings = state_for_language.borrow_mut();
+        if ["es-ES", "es-CO", "es-MX"].contains(&language.as_str()) {
+            settings.language = language;
+            speech_for_language.persist(settings_path_for_language.clone(), settings.clone());
+        }
+    });
+    let state_for_russian = speech_state.clone();
+    let settings_path_for_russian = settings_path.clone();
+    let speech_for_russian = speech.clone();
+    window.on_russian_translation_changed(move |enabled| {
+        speech_for_russian.set_russian_enabled(enabled);
+        let mut settings = state_for_russian.borrow_mut();
+        settings.russian_enabled = enabled;
+        speech_for_russian.persist(settings_path_for_russian.clone(), settings.clone());
+    });
+    let state_for_volume = speech_state.clone();
+    let settings_path_for_volume = settings_path.clone();
+    let speech_for_volume = speech.clone();
+    window.on_russian_volume_changed(move |volume| {
+        let volume = volume.clamp(0.3, 1.0);
+        speech_for_volume.set_russian_volume(volume);
+        let mut settings = state_for_volume.borrow_mut();
+        settings.russian_volume = volume;
+        speech_for_volume.persist(settings_path_for_volume.clone(), settings.clone());
+    });
+    let state_for_voice = speech_state.clone();
+    let settings_path_for_voice = settings_path.clone();
+    let speech_for_voice = speech.clone();
+    window.on_russian_voice_changed(move |voice| {
+        let voice = voice.to_string();
+        speech_for_voice.set_russian_voice(voice.clone());
+        let mut settings = state_for_voice.borrow_mut();
+        settings.russian_voice = voice;
+        speech_for_voice.persist(settings_path_for_voice.clone(), settings.clone());
+    });
+    window.on_test_voice_requested({
+        let speech = speech.clone();
+        move || speech.test_voice()
+    });
+    window.on_test_russian_voice_requested({
+        let speech = speech.clone();
+        move || speech.test_russian_voice()
+    });
+    let voices_weak = window.as_weak();
+    speech.on_russian_voices(move |voices, selected| {
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = voices_weak.upgrade() {
+                let voice_model = slint::VecModel::from(
+                    voices
+                        .iter()
+                        .cloned()
+                        .map(slint::SharedString::from)
+                        .collect::<Vec<_>>(),
+                );
+                ui.set_russian_voices(slint::ModelRc::new(voice_model));
+                let available = !voices.is_empty();
+                ui.set_russian_voice_available(available);
+                ui.set_russian_voice_status(if available {
+                    "Выберите локальный голос ru-RU".into()
+                } else {
+                    "Нет установленного локального голоса ru-RU".into()
+                });
+                if !selected.is_empty() {
+                    ui.set_russian_voice(selected.clone().into());
+                    ui.invoke_russian_voice_changed(selected.into());
+                }
+            }
+        });
+    });
+    speech.phrase_changed_with_id(phrases[0].0, &phrases[0].1, &phrases[0].2);
+
     // Integrate real elapsed time in dp/sec. The same normalized progress drives both
     // text rows; there is no fixed-pixel stepping and SQLite is only read at phrase changes.
+    let speech_for_timer = speech.clone();
     timer.start(
         slint::TimerMode::Repeated,
         Duration::from_millis(16),
@@ -238,11 +350,16 @@ pub fn run_gui_with_keep_screen_callback(
                             };
                         }
                         cursor = next.last().map(|item| item.0);
-                        phrases = next.into_iter().map(|item| (item.1, item.2)).collect();
+                        phrases = next;
                         pair_index = 0;
                     }
-                    ui.set_spanish(phrases[pair_index].0.as_str().into());
-                    ui.set_russian(phrases[pair_index].1.as_str().into());
+                    ui.set_spanish(phrases[pair_index].1.as_str().into());
+                    ui.set_russian(phrases[pair_index].2.as_str().into());
+                    speech_for_timer.phrase_changed_with_id(
+                        phrases[pair_index].0,
+                        &phrases[pair_index].1,
+                        &phrases[pair_index].2,
+                    );
                     phrase_changed = true;
                 }
                 ui.set_snap_progress(phrase_changed);
@@ -287,8 +404,17 @@ pub fn run_gui_with_keep_screen_callback(
         },
     );
 
-    window.run()?;
+    let result = window.run();
+    speech.shutdown();
+    result?;
     Ok(())
+}
+
+fn load_speech_settings(database: &Path) -> speech::SpeechSettings {
+    let path = database.with_extension("ticker-settings");
+    std::fs::read_to_string(path)
+        .map(|text| speech::SpeechSettings::parse(&text))
+        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -457,13 +583,17 @@ fn android_entry(app: slint::android::AndroidApp) -> Result<(), Box<dyn Error>> 
             }
         })?;
 
-    run_gui_with_keep_screen_callback(&database, move |keep_screen_on| {
-        let callback_started = Instant::now();
-        let thread_id = std::thread::current().id();
-        eprintln!(
+    let speech_settings = load_speech_settings(&database);
+    let speech = speech::SpeechService::android(app.clone(), &speech_settings);
+    run_gui_with_keep_screen_callback(
+        &database,
+        move |keep_screen_on| {
+            let callback_started = Instant::now();
+            let thread_id = std::thread::current().id();
+            eprintln!(
             "FluoVerba keep-screen callback begin: thread={thread_id:?}, enabled={keep_screen_on}"
         );
-        match keep_screen_tx.send(keep_screen_on) {
+            match keep_screen_tx.send(keep_screen_on) {
             Ok(()) => eprintln!(
                 "FluoVerba keep-screen callback queued: thread={thread_id:?}, enabled={keep_screen_on}"
             ),
@@ -471,9 +601,12 @@ fn android_entry(app: slint::android::AndroidApp) -> Result<(), Box<dyn Error>> 
                 "FluoVerba keep-screen callback queue failed: thread={thread_id:?}, error={error}"
             ),
         }
-        eprintln!(
-            "FluoVerba keep-screen callback end: thread={thread_id:?}, duration={:.3} ms",
-            callback_started.elapsed().as_secs_f64() * 1000.0
-        );
-    })
+            eprintln!(
+                "FluoVerba keep-screen callback end: thread={thread_id:?}, duration={:.3} ms",
+                callback_started.elapsed().as_secs_f64() * 1000.0
+            );
+        },
+        speech,
+        speech_settings,
+    )
 }

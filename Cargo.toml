@@ -27,6 +27,7 @@ rusqlite = { version = "=0.41.1", features = ["bundled"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = "=0.6.1"
+jni = "=0.22.4"
 
 [build-dependencies]
 slint-build = "=1.18.1"
@@ -42,6 +43,11 @@ package = "org.fluoverba.ticker"
 build_targets = ["aarch64-linux-android"]
 assets = "android/assets"
 apk_name = "fluoverba"
+java_sources = "android/java"
+manifest_override = "android/AndroidManifest.xml"
+
+[[package.metadata.android.queries.intent]]
+actions = ["android.intent.action.TTS_SERVICE"]
 
 [package.metadata.android.application]
 label = "FluoVerba"

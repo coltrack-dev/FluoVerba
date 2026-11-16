@@ -1,9 +1,9 @@
-import { Slider } from "std-widgets.slint";
+import { ComboBox, Slider } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "FluoVerba";
     preferred-width: 900px;
-    preferred-height: 180px;
+    preferred-height: 370px;
     background: transparent;
 
     in-out property <string> spanish: "";
@@ -16,11 +16,28 @@ export component MainWindow inherits Window {
     in-out property <length> belt-y: 0px;
     in-out property <bool> settings-open: false;
     in-out property <bool> keep-screen-on: false;
+    in-out property <bool> speech-enabled: false;
+    in-out property <float> speech-rate: 1.0;
+    in-out property <string> speech-language: "es-ES";
+    in-out property <bool> russian-translation-enabled: true;
+    in-out property <float> russian-volume: 0.75;
+    in-out property <string> russian-voice: "";
+    in-out property <[string]> russian-voices: [];
+    in-out property <string> russian-voice-status: "Загрузка локальных голосов ru-RU…";
+    in-out property <bool> russian-voice-available: false;
     in-out property <bool> drag-active: false;
     in-out property <length> drag-offset: 0px;
     callback toggle-settings-requested();
     callback speed-changed(float);
     callback keep-screen-changed(bool);
+    callback speech-enabled-changed(bool);
+    callback test-voice-requested();
+    callback speech-rate-changed(float);
+    callback speech-language-changed(string);
+    callback russian-translation-changed(bool);
+    callback russian-volume-changed(float);
+    callback russian-voice-changed(string);
+    callback test-russian-voice-requested();
     callback belt-position-saved(length);
 
     animate progress { duration: root.snap-progress ? 0ms : 16ms; easing: linear; }
@@ -92,15 +109,15 @@ export component MainWindow inherits Window {
 
     if root.settings-open: Rectangle {
         x: 8px;
-        y: max(0px, min(root.height - 108px, root.effective-belt-y + ticker_rail.height + 4px));
+        y: max(0px, min(root.height - 318px, root.effective-belt-y + ticker_rail.height + 4px));
         width: min(root.width - 16px, 320px);
-        height: 100px;
+        height: 310px;
         border-radius: 8px;
         background: #263848;
-        Text { x: 10px; y: 8px; text: "Speed: " + round(root.speed) + " dp/s"; color: #f1f5f9; font-size: 14px; }
+        Text { x: 10px; y: 5px; text: "Scroll: " + round(root.speed) + " dp/s"; color: #f1f5f9; font-size: 13px; }
         Slider {
             x: 10px;
-            y: 28px;
+            y: 22px;
             width: parent.width - 20px;
             minimum: 5;
             maximum: 120;
@@ -108,7 +125,7 @@ export component MainWindow inherits Window {
             changed(value) => { root.speed = value; root.speed-changed(value); }
         }
         Rectangle {
-            x: 10px; y: 63px; width: parent.width - 20px; height: 28px;
+            x: 10px; y: 47px; width: parent.width - 20px; height: 25px;
             background: transparent;
             Text { text: root.keep-screen-on ? "Keep screen on: ON" : "Keep screen on: OFF"; color: #f1f5f9; font-size: 14px; vertical-alignment: center; }
             TouchArea {
@@ -117,6 +134,72 @@ export component MainWindow inherits Window {
                     root.keep-screen-changed(root.keep-screen-on);
                 }
             }
+        }
+        Rectangle {
+            x: 10px; y: 73px; width: 132px; height: 26px;
+            background: transparent;
+            Text { text: root.speech-enabled ? "Озвучка фраз: ВКЛ" : "Озвучка фраз: ВЫКЛ"; color: #f1f5f9; font-size: 14px; vertical-alignment: center; }
+            TouchArea { width: parent.width;
+                clicked => {
+                    root.speech-enabled = !root.speech-enabled;
+                    root.speech-enabled-changed(root.speech-enabled);
+                }
+            }
+        }
+        Rectangle {
+            x: 148px; y: 73px; width: parent.width - 158px; height: 26px;
+            border-radius: 4px;
+            background: #344f5e;
+            Text { text: "Тест ES"; color: #f1f5f9; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea { clicked => { root.test-voice-requested(); } }
+        }
+        ComboBox {
+            x: 10px; y: 101px; width: parent.width - 20px; height: 28px;
+            model: ["es-ES", "es-CO", "es-MX"];
+            current-value: root.speech-language;
+            selected => { root.speech-language-changed(self.current-value); }
+        }
+        Rectangle {
+            x: 10px; y: 133px; width: 132px; height: 26px;
+            background: transparent;
+            Text { text: root.russian-translation-enabled ? "Русский перевод: ВКЛ" : "Русский перевод: ВЫКЛ"; color: #f1f5f9; font-size: 13px; vertical-alignment: center; }
+            TouchArea { width: parent.width;
+                clicked => {
+                    root.russian-translation-enabled = !root.russian-translation-enabled;
+                    root.russian-translation-changed(root.russian-translation-enabled);
+                }
+            }
+        }
+        Rectangle {
+            x: 148px; y: 133px; width: parent.width - 158px; height: 26px;
+            border-radius: 4px;
+            background: root.russian-voice-available ? #344f5e : #39434a;
+            Text { text: "Проверить голос"; color: #f1f5f9; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea { enabled: root.russian-voice-available; clicked => { root.test-russian-voice-requested(); } }
+        }
+        ComboBox {
+            x: 10px; y: 163px; width: parent.width - 20px; height: 28px;
+            model: root.russian-voices;
+            current-value: root.russian-voice;
+            enabled: root.russian-voice-available;
+            selected => { root.russian-voice-changed(self.current-value); }
+        }
+        Text { x: 10px; y: 193px; text: "Громкость RU: " + round(root.russian-volume * 100) + "%"; color: #f1f5f9; font-size: 13px; }
+        Slider {
+            x: 10px; y: 211px; width: parent.width - 20px;
+            minimum: 0.3; maximum: 1.0; value: root.russian-volume;
+            changed(value) => { root.russian-volume = value; root.russian-volume-changed(value); }
+        }
+        Text { x: 10px; y: 237px; text: "Speech rate: " + round(root.speech-rate * 100) / 100 + "x"; color: #f1f5f9; font-size: 13px; }
+        Slider {
+            x: 10px; y: 255px; width: parent.width - 20px;
+            minimum: 0.5; maximum: 1.5; value: root.speech-rate;
+            changed(value) => { root.speech-rate = value; root.speech-rate-changed(value); }
+        }
+        Text {
+            x: 10px; y: 281px; width: parent.width - 20px; height: 24px;
+            text: root.russian-voice-status;
+            color: root.russian-voice-available ? #9be7c4 : #f2c879; font-size: 11px;
         }
     }
 }
