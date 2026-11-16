@@ -1,14 +1,6 @@
-mod storage;
+use std::{error::Error, fs, io::BufReader, path::PathBuf};
 
-use std::{
-    error::Error,
-    fs,
-    io::BufReader,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
-
-slint::include_modules!();
+use fluoverba::storage;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args_os().skip(1);
@@ -69,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Ok(())
         }
-        None => run_gui(),
+        None => fluoverba::run_gui_at(&storage::database_path()?),
         Some(other) => Err(format!(
             "unknown command {other:?}; use `import`, `stats`, or no command for the GUI"
         )
@@ -79,75 +71,4 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn default_tsv_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/imports/spa-rus.tsv")
-}
-
-fn run_gui() -> Result<(), Box<dyn Error>> {
-    let database = storage::database_path()?;
-    if !storage::database_exists(&database) {
-        return Err(format!(
-            "database not found at {}; run `fluoverba import [path/to/spa-rus.tsv]` first",
-            database.display()
-        )
-        .into());
-    }
-    let connection = storage::open_database(&database)?;
-    let mut batch = storage::gui_pairs_after(&connection, None)?;
-    let mut cursor = batch.last().map(|item| item.0);
-    let mut phrases: Vec<_> = batch.drain(..).map(|item| (item.1, item.2)).collect();
-
-    let window = MainWindow::new()?;
-    let weak = window.as_weak();
-    let timer = slint::Timer::default();
-    let start = Instant::now();
-    window.set_spanish(phrases[0].0.as_str().into());
-    window.set_russian(phrases[0].1.as_str().into());
-    let mut displayed_cycle = 0usize;
-    let mut pair_index = 0usize;
-
-    // Read bounded pages only when the current page is exhausted, never once per frame.
-    timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(33),
-        move || {
-            if let Some(ui) = weak.upgrade() {
-                let elapsed = start.elapsed().as_secs_f32();
-                let cycle = (elapsed / 8.0) as usize;
-                if cycle > displayed_cycle {
-                    while displayed_cycle < cycle {
-                        pair_index += 1;
-                        if pair_index >= phrases.len() {
-                            let mut next = match storage::gui_pairs_after(&connection, cursor) {
-                                Ok(next) => next,
-                                Err(error) => {
-                                    eprintln!("Could not load the next phrase batch: {error}");
-                                    ui.set_progress((elapsed % 8.0) / 8.0);
-                                    return;
-                                }
-                            };
-                            if next.is_empty() {
-                                next = match storage::gui_pairs_after(&connection, None) {
-                                    Ok(next) => next,
-                                    Err(error) => {
-                                        eprintln!("Could not reload phrase batch: {error}");
-                                        ui.set_progress((elapsed % 8.0) / 8.0);
-                                        return;
-                                    }
-                                };
-                            }
-                            cursor = next.last().map(|item| item.0);
-                            phrases = next.into_iter().map(|item| (item.1, item.2)).collect();
-                            pair_index = 0;
-                        }
-                        displayed_cycle += 1;
-                    }
-                    ui.set_spanish(phrases[pair_index].0.as_str().into());
-                    ui.set_russian(phrases[pair_index].1.as_str().into());
-                }
-                ui.set_progress((elapsed % 8.0) / 8.0);
-            }
-        },
-    );
-
-    window.run()?;
-    Ok(())
 }

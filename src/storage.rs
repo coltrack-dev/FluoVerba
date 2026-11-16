@@ -28,7 +28,11 @@ pub fn database_path() -> AppResult<PathBuf> {
     let base: Option<PathBuf> = None;
 
     let base = base.ok_or("could not determine the OS user data directory")?;
-    Ok(base.join("FluoVerba").join("fluoverba.sqlite3"))
+    Ok(database_path_under(&base))
+}
+
+pub fn database_path_under(base: &Path) -> PathBuf {
+    base.join("FluoVerba").join("fluoverba.sqlite3")
 }
 
 pub fn open_database(path: &Path) -> AppResult<Connection> {
@@ -162,7 +166,7 @@ pub fn gui_pairs_after(
             |row| Ok(((row.get(0)?, row.get(1)?), row.get(2)?, row.get(3)?)),
         )?
         .collect::<Result<Vec<_>, _>>()?;
-    if pairs.is_empty() {
+    if pairs.is_empty() && after.is_none() {
         return Err("database has no Spanish–Russian pairs; run `fluoverba import [path/to/spa-rus.tsv]` first".into());
     }
     Ok(pairs)
@@ -212,6 +216,15 @@ mod tests {
     }
 
     #[test]
+    fn bundled_sqlite_is_at_least_3_54_0() {
+        assert!(
+            rusqlite::version_number() >= 3_054_000,
+            "bundled SQLite {} is older than 3.54.0",
+            rusqlite::version()
+        );
+    }
+
+    #[test]
     fn import_keeps_global_ids_deduplicates_links_and_supports_many_translations() {
         let (mut connection, path) = test_db();
         assert_eq!(import_tsv(&mut connection, data()).unwrap(), 3);
@@ -251,6 +264,9 @@ mod tests {
             vec![("rus".to_owned(), 2), ("spa".to_owned(), 1)]
         );
         assert_eq!(links, 2);
+        assert!(gui_pairs_after(&connection, Some((2483, 469594)))
+            .unwrap()
+            .is_empty());
         drop(connection);
         let _ = std::fs::remove_file(path);
     }

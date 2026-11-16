@@ -1,40 +1,122 @@
+import { Slider } from "std-widgets.slint";
+
 export component MainWindow inherits Window {
     title: "FluoVerba";
     preferred-width: 900px;
-    preferred-height: 120px;
-    background: #14202c;
+    preferred-height: 180px;
+    background: transparent;
 
     in-out property <string> spanish: "";
     in-out property <string> russian: "";
     in-out property <float> progress: 0;
+    in-out property <bool> snap-progress: false;
+    out property <length> travel-distance: root.width + ticker_rail.width;
+    out property <length> effective-belt-y: max(0px, min(root.height - ticker_rail.height, root.belt-y));
+    in-out property <float> speed: 20;
+    in-out property <length> belt-y: 0px;
+    in-out property <bool> settings-open: false;
+    in-out property <bool> keep-screen-on: false;
+    in-out property <bool> drag-active: false;
+    in-out property <length> drag-offset: 0px;
+    callback toggle-settings-requested();
+    callback speed-changed(float);
+    callback keep-screen-changed(bool);
+    callback belt-position-saved(length);
 
-    // A single position is shared by both lines: they cannot drift apart.
+    animate progress { duration: root.snap-progress ? 0ms : 16ms; easing: linear; }
+
+    TouchArea {
+        width: root.width;
+        height: root.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.drag-active = self.mouse-y >= root.effective-belt-y && self.mouse-y <= root.effective-belt-y + ticker_rail.height;
+                root.drag-offset = self.mouse-y - root.effective-belt-y;
+            } else if (event.kind == PointerEventKind.move && root.drag-active) {
+                root.belt-y = max(0px, min(root.height - ticker_rail.height, self.mouse-y - root.drag-offset));
+            } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                if (root.drag-active) {
+                    root.belt-position-saved(root.effective-belt-y);
+                }
+                root.drag-active = false;
+            }
+        }
+    }
+
     Rectangle {
         background: #14202c;
         width: parent.width;
-        height: parent.height;
+        height: ticker_rail.height;
+        y: root.effective-belt-y;
 
-        Text {
-            text: root.spanish;
-            color: #f1f5f9;
-            font-size: 23px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            x: (1.0 - 2.0 * root.progress) * root.width;
-            y: 10px;
-            width: root.width;
-            height: 42px;
+        // One content-sized rail and one x coordinate keep both lines aligned.
+        ticker_rail := Rectangle {
+            x: root.width - root.progress * root.travel-distance;
+            y: 0px;
+            width: max(spanish_label.preferred-width, russian_label.preferred-width);
+            height: 6px + spanish_label.preferred-height + 4px + russian_label.preferred-height + 6px;
+            background: transparent;
+            spanish_label := Text {
+                text: root.spanish;
+                color: #f1f5f9;
+                font-size: 1.285714rem;
+                vertical-alignment: center;
+                x: 0px;
+                y: 6px;
+                width: self.preferred-width;
+                height: self.preferred-height;
+            }
+            russian_label := Text {
+                text: root.russian;
+                color: #9be7c4;
+                font-size: 1.142857rem;
+                vertical-alignment: center;
+                x: 0px;
+                y: 6px + spanish_label.preferred-height + 4px;
+                width: self.preferred-width;
+                height: self.preferred-height;
+            }
         }
-        Text {
-            text: root.russian;
-            color: #9be7c4;
-            font-size: 20px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            x: (1.0 - 2.0 * root.progress) * root.width;
-            y: 62px;
-            width: root.width;
-            height: 38px;
+
+        Rectangle {
+            x: parent.width - 38px;
+            y: 4px;
+            width: 34px;
+            height: 24px;
+            border-radius: 6px;
+            background: #263848;
+            Text { text: "⋮"; color: #f1f5f9; font-size: 18px; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea { clicked => { root.toggle-settings-requested(); } }
+        }
+    }
+
+    if root.settings-open: Rectangle {
+        x: 8px;
+        y: max(0px, min(root.height - 108px, root.effective-belt-y + ticker_rail.height + 4px));
+        width: min(root.width - 16px, 320px);
+        height: 100px;
+        border-radius: 8px;
+        background: #263848;
+        Text { x: 10px; y: 8px; text: "Speed: " + round(root.speed) + " dp/s"; color: #f1f5f9; font-size: 14px; }
+        Slider {
+            x: 10px;
+            y: 28px;
+            width: parent.width - 20px;
+            minimum: 5;
+            maximum: 120;
+            value: root.speed;
+            changed(value) => { root.speed = value; root.speed-changed(value); }
+        }
+        Rectangle {
+            x: 10px; y: 63px; width: parent.width - 20px; height: 28px;
+            background: transparent;
+            Text { text: root.keep-screen-on ? "Keep screen on: ON" : "Keep screen on: OFF"; color: #f1f5f9; font-size: 14px; vertical-alignment: center; }
+            TouchArea {
+                clicked => {
+                    root.keep-screen-on = !root.keep-screen-on;
+                    root.keep-screen-changed(root.keep-screen-on);
+                }
+            }
         }
     }
 }
